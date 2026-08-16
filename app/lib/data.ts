@@ -9,77 +9,40 @@ import {
 } from './definitions';
 import { formatCurrency } from './utils';
 
-// Lazy initialization of database connection with fallback
-let neonClient: ReturnType<typeof postgres> | null = null;
-let localClient: ReturnType<typeof postgres> | null = null;
-let hasWarnedAboutFallback = false;
+// Simpler approach: try Neon first, fallback to explicit local config
+// Note: For local development, you may need to set up a local PostgreSQL database
+// and adjust these credentials accordingly
+let sqlInstance = null;
 
-function getNeonClient() {
-  if (neonClient) return neonClient;
-
-  if (!process.env.POSTGRES_URL) {
-    return null;
+try {
+  // Try to use the Neon database from environment variables
+  if (process.env.POSTGRES_URL) {
+    sqlInstance = postgres(process.env.POSTGRES_URL, { ssl: 'require' });
+    console.log('Using Neon database connection');
+  } else {
+    throw new Error('POSTGRES_URL not defined');
   }
+} catch (neonError) {
+  console.warn('Failed to initialize Neon database connection, falling back to local PostgreSQL:', (neonError as Error).message);
 
+  // Fallback to local PostgreSQL - adjust these values as needed for your setup
   try {
-    neonClient = postgres(process.env.POSTGRES_URL, { ssl: 'require' });
-    // Don't test connection here to avoid build-time failures
-    return neonClient;
-  } catch (error) {
-    console.warn('Failed to create Neon client:', (error as Error).message);
-    return null;
-  }
-}
-
-function getLocalClient() {
-  if (localClient) return localClient;
-
-  try {
-    localClient = postgres({
+    sqlInstance = postgres({
       host: 'localhost',
       port: 5432,
       database: 'postgres',
       username: 'postgres',
       password: 'postgres'
     });
-    // Don't test connection here to avoid build-time failures
-    return localClient;
-  } catch (error) {
-    console.warn('Failed to create local PostgreSQL client:', (error as Error).message);
-    return null;
+    console.log('Using local PostgreSQL connection');
+  } catch (localError) {
+    console.error('Failed to initialize local PostgreSQL connection:', (localError as Error).message);
+    // If both fail, fall back to original (will show error when used)
+    sqlInstance = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
   }
 }
 
-function getSqlClient() {
-  // Try Neon first
-  const neon = getNeonClient();
-  if (neon) {
-    if (!hasWarnedAboutFallback) {
-      console.log('Using Neon database connection');
-      hasWarnedAboutFallback = true;
-    }
-    return neon;
-  }
-
-  // Fallback to local
-  const local = getLocalClient();
-  if (local) {
-    if (!hasWarnedAboutFallback) {
-      console.log('Using local PostgreSQL connection (Neon unavailable)');
-      hasWarnedAboutFallback = true;
-    }
-    return local;
-  }
-
-  // If both fail, create a Neon client that will show the original error when used
-  if (!hasWarnedAboutFallback) {
-    console.error('Both Neon and local PostgreSQL connections failed. Will show connection error when querying.');
-    hasWarnedAboutFallback = true;
-  }
-  return postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
-}
-
-const sql = getSqlClient();
+const sql = sqlInstance;
 
 export async function fetchRevenue() {
   try {
