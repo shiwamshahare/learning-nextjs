@@ -9,7 +9,40 @@ import {
 } from './definitions';
 import { formatCurrency } from './utils';
 
-const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+// Simpler approach: try Neon first, fallback to explicit local config
+// Note: For local development, you may need to set up a local PostgreSQL database
+// and adjust these credentials accordingly
+let sqlInstance = null;
+
+try {
+  // Try to use the Neon database from environment variables
+  if (process.env.POSTGRES_URL) {
+    sqlInstance = postgres(process.env.POSTGRES_URL, { ssl: 'require' });
+    console.log('Using Neon database connection');
+  } else {
+    throw new Error('POSTGRES_URL not defined');
+  }
+} catch (neonError) {
+  console.warn('Failed to initialize Neon database connection, falling back to local PostgreSQL:', (neonError as Error).message);
+
+  // Fallback to local PostgreSQL - adjust these values as needed for your setup
+  try {
+    sqlInstance = postgres({
+      host: 'localhost',
+      port: 5432,
+      database: 'postgres',
+      username: 'postgres',
+      password: 'postgres'
+    });
+    console.log('Using local PostgreSQL connection');
+  } catch (localError) {
+    console.error('Failed to initialize local PostgreSQL connection:', (localError as Error).message);
+    // If both fail, fall back to original (will show error when used)
+    sqlInstance = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+  }
+}
+
+const sql = sqlInstance;
 
 export async function fetchRevenue() {
   try {
